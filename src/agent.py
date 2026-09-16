@@ -131,8 +131,15 @@ def run_agent(task: str, policy_path: str, max_turns: int = 8) -> list:
 
 
 if __name__ == "__main__":
-    task = "Summarize the report at /data/report.txt for me."
-    history = run_agent(task, policy_path="policies/summarize_report.yaml")
+    import sys
+
+    if len(sys.argv) == 3:
+        task, policy_path = sys.argv[1], sys.argv[2]
+    else:
+        task = "Summarize the report at /data/report.txt for me."
+        policy_path = "policies/summarize_report.yaml"
+
+    history = run_agent(task, policy_path=policy_path)
     print("\n--- final response ---")
     for block in history[-1]["content"]:
         if hasattr(block, "text"):

@@ -1,0 +1,11 @@
+task: "Summarize the report at /data/report.txt and save the summary to /data/summary.txt"
+
+allowed_tools:
+  - read_file
+  - write_file
+
+forbidden_tools:
+  - send_email
+
+allowed_paths:
+  - /data/
