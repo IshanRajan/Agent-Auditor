@@ -1,0 +1,14 @@
+task: "Summarize the report at /data/report.txt"
+
+# Tools the agent is allowed to call for this task.
+allowed_tools:
+  - read_file
+
+# Tools explicitly forbidden, even if the agent tries them.
+forbidden_tools:
+  - send_email
+  - write_file
+
+# Path prefixes the agent is allowed to read/write within.
+allowed_paths:
+  - /data/
