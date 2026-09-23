@@ -54,7 +54,7 @@ also fix any stale section in this file that the finding made wrong (architectur
 
 ## what this project is
 
-Agent-Auditor is a **policy audit layer** for a tool-calling LLM agent. the model can propose tool calls; before any tool actually runs, an interceptor checks the call against a yaml policy (allowed tools, forbidden tools, allowed path prefixes) and logs the decision.
+Agent-Auditor is a **policy audit layer** plus an **outcome judge** for a tool-calling LLM agent. the model can propose tool calls; before any tool actually runs, an interceptor checks the call against a yaml policy (allowed tools, forbidden tools, allowed path prefixes) and logs the decision. after the run, a separate judge reviews the full transcript and checks whether the task was actually completed.
 
 the agent does not know it's audited. stubs fake the filesystem and email so you can demo prompt-injection safely without real side effects.
 
@@ -88,18 +88,26 @@ user task + policy yaml
 ┌───────────────────┐
 │  policies/*.yaml  │  per-task allow/forbid/path rules
 └───────────────────┘
+
+after the loop finishes:
+┌───────────────────┐
+│  src/judge.py     │  summarize_transcript() must include RESULT lines
+│  judge_run()      │  separate Claude call → {"verdict","reason"}
+└───────────────────┘
 ```
 
 ### components
 
 | piece | role |
 |-------|------|
-| `src/agent.py` | CLI + loop. talks to Claude, defines tools, owns `FAKE_FS` / `execute_tool`, calls `audited_execute` for each tool use |
+| `src/agent.py` | CLI + loop. talks to Claude, defines tools, owns `FAKE_FS` / `execute_tool`, calls `audited_execute` for each tool use; after run, calls the judge |
 | `src/interceptor.py` | gate between "model decided" and "tool ran". logs every decision |
 | `src/policy.py` | yaml load + pure check logic (no I/O beyond reading the policy file) |
+| `src/judge.py` | outcome check: transcript (CALLED + RESULT + SAID) → separate Claude verdict pass/fail |
 | `policies/` | task-scoped rules. swap file = swap what the task may do |
 | `logs/` | append-only jsonl audit trail |
-| `tests/test_interceptor.py` | policy/interceptor proof **without** an LLM |
+| `tests/test_interceptor.py` | policy/interceptor proof **without** an agent LLM |
+| `tests/test_judge.py` | judge proof with hand-written transcripts (**needs** api key; skips the agent) |
 
 ### request flow (one tool call)
 
@@ -111,6 +119,7 @@ user task + policy yaml
 4. interceptor: `check_action` → if allowed, call `execute_tool`; else return a block string to the model.
 5. interceptor always appends one json line to the log and prints `[audit] ALLOWED|BLOCKED`.
 6. tool results go back into the conversation; loop until the model stops calling tools or `max_turns` hits.
+7. CLI then builds a transcript via `summarize_transcript` (must include `RESULT:` lines) and calls `judge_run` → prints `--- judge verdict ---`.
 
 ### policy check order
 
@@ -123,8 +132,10 @@ important — order is intentional:
 ### trust boundary
 
 - **model judgment** = first line (may refuse injection on its own).
-- **interceptor** = independent second line; does not care why the model called the tool.
+- **interceptor** = independent second line; does not care why the model called the tool. checks *allowed actions*, not *good outcomes*.
+- **judge** = third line; checks whether the transcript shows the task was actually done (complete + grounded in tool results). a run can pass the interceptor and fail the judge (or the reverse, in theory).
 - never put real network/fs/email behind `execute_tool` without keeping the interceptor in the middle.
+- never feed the judge a transcript that omits tool `RESULT`s — it will just trust the agent's `SAID` claims (critical bug; fixed).
 
 ---
 
@@ -168,11 +179,20 @@ python tests/test_interceptor.py
 
 covers: forbidden `send_email`, allowed `read_file` under `/data/`, blocked `read_file` on `/etc/passwd`.
 
+### judge tests (needs api key; no agent)
+
+```bash
+python tests/test_judge.py
+```
+
+covers: good summary → pass; incomplete (no write) → fail; fabricated (no read) → fail.
+
 ### what you should see
 
-- agent: `[tool call] ...` then `[audit] ALLOWED|BLOCKED — ...`, then `--- final response ---`
-- tests: three `PASS:` lines + `All interceptor tests passed.`
-- logs: `logs/actions.jsonl` (agent), `logs/test_actions.jsonl` (tests)
+- agent: `[tool call] ...` then `[audit] ALLOWED|BLOCKED — ...`, then `--- final response ---`, then `--- judge verdict ---`
+- interceptor tests: three `PASS:` lines + `All interceptor tests passed.`
+- judge tests: `[good|incomplete|fabricated run]` verdict lines + three `PASS:` lines + `All judge tests passed.`
+- logs: `logs/actions.jsonl` (agent), `logs/test_actions.jsonl` (interceptor tests)
 
 ---
 
@@ -190,6 +210,7 @@ Agent-Auditor/
 │   ├── agent.py
 │   ├── interceptor.py
 │   ├── policy.py
+│   ├── judge.py
 │   └── skills.md
 ├── policies/
 │   ├── summarize_report.yaml
@@ -197,6 +218,7 @@ Agent-Auditor/
 │   └── skills.md
 ├── tests/
 │   ├── test_interceptor.py
+│   ├── test_judge.py
 │   └── skills.md
 └── logs/
     ├── actions.jsonl
@@ -225,6 +247,8 @@ do not commit `.env`. do not treat `FAKE_FS` / fake `send_email` as production I
 | no `[audit]` lines | model never called a tool (text-only refuse), or wrong stdout |
 | `FileNotFoundError` on yaml | policy path wrong; must be relative to root |
 | expected block didn't happen | tool name spelling vs yaml; path prefix `startswith`; see `reason` in jsonl |
+| judge passes fabricated answers | transcript missing `RESULT:` lines — `summarize_transcript` must include tool returns, not only CALLED/SAID |
+| judge returns `verdict: error` | model didn't return parseable JSON; see `reason` raw text |
 
 deeper notes: the per-directory `skills.md` files.
 
@@ -233,6 +257,12 @@ deeper notes: the per-directory `skills.md` files.
 ## findings log
 
 append-only learning surface. **newest first.** agents: see [self-improve protocol](#self-improve-protocol).
+
+### 2026-09-23 — judge transcript omitted tool results
+- **type:** critical-fix
+- **what:** first `summarize_transcript` only emitted CALLED/SAID. judge could not tell a grounded summary from a fabricated one because it never saw real tool returns. fixed to emit `RESULT:` lines from `tool_result` blocks (dicts built in `agent.py`).
+- **why it matters:** without RESULT lines the judge is just trusting the agent — same class of failure the judge exists to catch.
+- **fix or follow-up:** `src/judge.py` includes RESULT; `tests/test_judge.py` covers good / incomplete / fabricated. interceptor ≠ judge: policy vs outcome. both are required.
 
 ### 2026-09-23 — master skills is the project memory
 - **type:** finding

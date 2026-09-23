@@ -4,9 +4,10 @@ how to run, wire, and debug the agent + audit layer.
 
 ## what this dir is
 
-- `agent.py` — tool-calling loop, fake tools, `FAKE_FS`, CLI entrypoint
+- `agent.py` — tool-calling loop, fake tools, `FAKE_FS`, CLI entrypoint; after the run, calls the judge
 - `interceptor.py` — policy gate + jsonl logging around every tool call
 - `policy.py` — load yaml + `check_action()` allow/forbid/path rules
+- `judge.py` — `summarize_transcript` (must include RESULT lines) + `judge_run` (separate Claude pass/fail)
 
 imports assume these modules sit on the path (agent is run as `python src/agent.py` from root; tests insert `src/` into `sys.path`).
 
@@ -29,15 +30,16 @@ defaults if no args: summarize `/data/report.txt` with `policies/summarize_repor
 
 `--naive` turns on a system prompt that tells the model to follow instructions found inside documents (injection stress test).
 
-needs `ANTHROPIC_API_KEY` in root `.env`.
+needs `ANTHROPIC_API_KEY` in root `.env`. agent run also prints `--- judge verdict ---` at the end.
 
-to exercise policy without the llm, don't run these files alone for the happy path — use `python tests/test_interceptor.py`.
+to exercise policy without the agent llm: `python tests/test_interceptor.py`.
+to exercise the judge without the agent: `python tests/test_judge.py` (still needs api key).
 
 ## deploy
 
 nothing to deploy. `execute_tool` is stubs only (`FAKE_FS`, fake email). don't point this at a real filesystem or mail API without rewriting `execute_tool` and tightening policies.
 
-if you reuse this elsewhere: keep `audited_execute` between the model and any real side effect.
+if you reuse this elsewhere: keep `audited_execute` between the model and any real side effect; keep judge transcripts including real tool `RESULT`s.
 
 ## debug
 
@@ -61,4 +63,12 @@ if you reuse this elsewhere: keep `audited_execute` between the model and any re
 - empty/`missing` allowed_tools means no allow-list filter (still subject to forbidden + paths).
 - path check is `startswith` on prefixes — `/data` vs `/data/` matters for some paths; policies use `/data/`.
 
-quick manual check without llm: call `audited_execute` from a small script or use the tests.
+### judge.py
+
+- transcript **must** include `RESULT:` for each tool return. CALLED/SAID alone lets the judge trust fabrications.
+- `tool_result` blocks in history are plain dicts (from `agent.py`), not SDK objects — use dict access in `summarize_transcript`.
+- judge expects JSON `{"verdict":"pass"|"fail","reason":"..."}`; parse failures become `verdict: error`.
+- CLI path: after the agent loop, `summarize_transcript` → `judge_run` → print verdict.
+
+quick manual check without llm: call `audited_execute` from a small script or use the interceptor tests.
+judge without the agent: `python tests/test_judge.py`.
