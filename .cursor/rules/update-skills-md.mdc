@@ -1,0 +1,24 @@
+---
+description: After findings or critical bug fixes, update root skills.md so project knowledge stays self-improving.
+alwaysApply: true
+---
+
+# Update root skills.md (self-improving)
+
+When you make a **finding** (surprising behavior, security/policy gap, model quirk, non-obvious run constraint) or fix a **critical bug** (wrong allow/deny, crash on happy path, broken audit path, false-passing tests, auth/cwd footguns), you **must** update `skills.md` at the **repo root** in the **same turn** — do not wait for the user to ask.
+
+## Required actions
+
+1. Read the [self-improve protocol](skills.md#self-improve-protocol) in root `skills.md`.
+2. Append a newest-first entry under [findings log](skills.md#findings-log) using the template there.
+3. Patch any stale run / architecture / debug text in that same file.
+4. If the change is directory-specific, also update that directory's `skills.md` — but the root log entry is always required.
+
+## Skip
+
+Typos, pure renames, or formatting-only edits with no behavior change.
+
+## Do not
+
+- Leave critical-fix knowledge only in chat
+- Overclaim demos (e.g. say the interceptor blocked a live `send_email` if the model never called it)
