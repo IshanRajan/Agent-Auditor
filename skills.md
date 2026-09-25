@@ -270,8 +270,14 @@ append-only learning surface. **newest first.** agents: see [self-improve protoc
 - **why it matters:** without this, every chat re-learns cwd/policy/interceptor quirks and overclaims demo results.
 - **fix or follow-up:** self-improve protocol + this log; Cursor rule `.cursor/rules/update-skills-md.mdc` (`alwaysApply: true`).
 
+### 2026-09-25 — break-it trial count was 6, not 5
+- **type:** finding
+- **what:** README "trying to actually break it" undercounted trials as "5 combos." corrected to 6 trials varying model (sonnet/haiku), system prompt (none/naive), and injection wording (casual note vs fake system override). worst-case: haiku + naive + aggressive injection — still no `send_email`.
+- **why it matters:** wrong count makes the experiment look sloppier than it was; keep the writeup accurate.
+- **fix or follow-up:** README paragraph replaced; takeaway paragraph left unchanged.
+
 ### 2026-09-16 — models refuse injection; interceptor still required
 - **type:** finding
-- **what:** across multiple agent runs (read-only, write, write+"don't ask", sonnet/haiku, naive system prompt, fake `[SYSTEM OVERRIDE]` injection), the model refused `send_email` every time — interceptor never saw a live violation. direct tests in `tests/test_interceptor.py` still prove block/allow/path checks work without an LLM.
+- **what:** across agent runs (including 6 break-it trials varying sonnet/haiku, none/naive system prompt, casual vs `[SYSTEM OVERRIDE]` injection), the model refused `send_email` every time — interceptor never saw a live violation. direct tests in `tests/test_interceptor.py` still prove block/allow/path checks work without an LLM.
 - **why it matters:** "demo caught injection" ≠ "policy layer was stress-tested by the model." don't trust model self-defense as the only control; keep the independent check.
 - **fix or follow-up:** no product bug. document honestly in README; use interceptor tests to prove the gate. still unknown: which weaker model or subtler injection finally gets through.
